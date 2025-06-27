@@ -220,7 +220,7 @@ class MCPClient:
             "Check Holding Area": "Get rows from Holding Area sheet in Google Sheets",
             "Check DO": "Get rows from Delivery Order sheet in Google Sheets", 
             "Check Full Treatment": "Get rows from Full Treatment sheet in Google Sheets",
-            "NCR Queries": "Get NCR (Non-Conformance Report) list (direct tool)",
+            "Check Full NCR": "Get NCR (Non-Conformance Report) list (direct tool)",
             "General Query": "Ask complex questions (routed through AI Agent)"
         }
         return commands
