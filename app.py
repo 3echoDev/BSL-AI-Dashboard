@@ -6,6 +6,7 @@ from datetime import datetime
 import uuid
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
+import pytz  # Add this import
 
 # Load environment variables from .env file
 load_dotenv()
@@ -22,6 +23,34 @@ def get_base64_image(image_path):
 # Configure the page
 app_config = get_app_config()
 st.set_page_config(**app_config)
+
+# Set timezone for Singapore
+SGT = pytz.timezone('Asia/Singapore')
+
+def get_current_time():
+    """Get current time in Singapore timezone"""
+    return datetime.now(SGT)
+
+def format_timestamp(timestamp_str: str) -> str:
+    """Format timestamp to Singapore time"""
+    try:
+        # Parse the timestamp and convert to Singapore time
+        if timestamp_str.endswith('Z'):
+            # If UTC timestamp
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        else:
+            # If ISO format without timezone
+            dt = datetime.fromisoformat(timestamp_str)
+            if dt.tzinfo is None:
+                # If no timezone info, assume UTC
+                dt = dt.replace(tzinfo=pytz.UTC)
+        
+        # Convert to Singapore time
+        sgt_time = dt.astimezone(SGT)
+        return sgt_time.strftime('%H:%M:%S')
+    except Exception:
+        # Fallback to current time if parsing fails
+        return get_current_time().strftime('%H:%M:%S')
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -95,9 +124,9 @@ def display_chat_message(message: Dict, is_user: bool = True):
                 st.error(f"Error: {message.get('error', 'Unknown error')}")
         
         # Add timestamp with source info
-        timestamp = message.get("timestamp", datetime.now().isoformat())
+        timestamp = message.get("timestamp", get_current_time().isoformat())
         source_info = f" • {message.get('source', 'mcp_server')}" if not is_user else ""
-        st.caption(f"*{datetime.fromisoformat(timestamp.replace('Z', '+00:00')).strftime('%H:%M:%S')}{source_info}*")
+        st.caption(f"*{format_timestamp(timestamp)}{source_info}*")
 
 def main():
     initialize_session_state()
@@ -187,7 +216,7 @@ def main():
         # Add user message to history
         user_message = {
             "content": user_input,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": get_current_time().isoformat()
         }
         
         # Display user message immediately
@@ -223,7 +252,7 @@ def main():
                 assistant_message = {
                     "content": "",
                     "error": response["error"],
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": get_current_time().isoformat(),
                     "success": False
                 }
         

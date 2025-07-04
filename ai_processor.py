@@ -5,8 +5,17 @@ import pandas as pd
 from anthropic import Anthropic
 from typing import Dict, Any, List, Optional
 import logging
+import pytz
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Set timezone for Singapore
+SGT = pytz.timezone('Asia/Singapore')
+
+def get_current_time():
+    """Get current time in Singapore timezone"""
+    return datetime.now(SGT)
 
 class AIProcessor:
     """AI-powered processor for handling complex queries and data formatting"""
@@ -100,8 +109,9 @@ class AIProcessor:
                 return {
                     "success": True,
                     "response": formatted_response,
-                    "timestamp": pd.Timestamp.now().isoformat(),
-                    "source": "claude_formatted"
+                    "timestamp": get_current_time().isoformat(),
+                    "source": "claude_formatted",
+                    "tool_type": tool_context.get('type') if tool_context else None
                 }
             else:
                 logger.warning("No structured data extracted, using cleanup method")
@@ -113,7 +123,7 @@ class AIProcessor:
                 return {
                     "success": True,
                     "response": cleaned_response,
-                    "timestamp": pd.Timestamp.now().isoformat(),
+                    "timestamp": get_current_time().isoformat(),
                     "source": "cleaned_text"
                 }
                 
@@ -122,7 +132,7 @@ class AIProcessor:
             return {
                 "success": False,
                 "error": f"Failed to process response: {str(e)}",
-                "timestamp": pd.Timestamp.now().isoformat()
+                "timestamp": get_current_time().isoformat()
             }
     
     def process_query(self, query: str, previous_response: Optional[Dict] = None, 
@@ -169,7 +179,7 @@ class AIProcessor:
                     return {
                         "success": True,
                         "response": formatted_response,
-                        "timestamp": pd.Timestamp.now().isoformat(),
+                        "timestamp": get_current_time().isoformat(),
                         "source": "ai_processor_memory"
                     }
             
@@ -185,7 +195,7 @@ class AIProcessor:
             return {
                 "success": True,
                 "response": formatted_response,
-                "timestamp": pd.Timestamp.now().isoformat(),
+                "timestamp": get_current_time().isoformat(),
                 "source": "ai_processor"
             }
             
@@ -194,7 +204,7 @@ class AIProcessor:
             return {
                 "success": False,
                 "error": f"AI processing failed: {str(e)}",
-                "timestamp": pd.Timestamp.now().isoformat()
+                "timestamp": get_current_time().isoformat()
             }
     
     def _prepare_context(self, query: str, previous_response: Optional[Dict], 
@@ -396,12 +406,10 @@ CRITICAL INSTRUCTIONS for Holding Area data:
 3. **SHOW COMPLETE DATA TABLE** - Include ALL {len(data)} items in the table (do NOT truncate unless 100+ items)
 4. **NO "[...remaining X items...]"** - Show every single row of data
 5. **Focus on**: Stock Status, Current Status, Required Delivery Dates, PIC assignments
-6. **Highlight urgent items**: Items with "Not Found" or "Insufficient" stock status
-7. **Show delivery timeline**: Group by delivery dates to show urgency
-8. **PIC workload**: Show distribution of items per person responsible
-9. **Action items**: Focus on supplier sourcing and stock replenishment
+6. **Summary statistics only**: Show counts and breakdowns
+7. **NO key insights or action items**: Only show summary statistics
 
-Format as: BSL Holding Area Management Report with actionable insights for operations team.
+Format as: BSL Holding Area Management Report with summary statistics only.
 IMPORTANT: Show the COMPLETE table with all {len(data)} rows - users need to see every item.{large_dataset_note}"""
             else:
                 # For large datasets, provide structured approach
@@ -487,9 +495,8 @@ Instructions for formatting BSL business data:
 
 Format like a professional business report with:
 - DATA TABLE FIRST with actual records (show 50+ rows if possible, never just headers)
-- Key insights and metrics
-- Status summaries  
-- Action items if relevant
+- Summary statistics only
+- NO key insights or action items
 
 CRITICAL: Show REAL DATA ROWS from the {len(data)} records - not placeholders or truncation messages.
 If you can't show all {len(data)} rows due to space, show as many as possible (50+ preferred) with real data."""
@@ -522,7 +529,7 @@ CONTENT REQUIREMENTS:
 1. **Professional title**: "BSL Non-Conformance Report (NCR) Analysis"
 2. **FULL DATA TABLE**: Show 50+ actual records (NOT a summary) - display real NCR data rows
 3. **Summary statistics**: Count by status, customer breakdown, etc. (AFTER the table)
-4. **Key insights**: Highlight patterns and issues (AFTER the table)
+4. **NO key insights or action items**: Only show summary statistics
 
 MANDATORY: Display a table with 50+ actual data rows from the provided dataset. Users need to see substantial data, not just summaries.""",
                 messages=[
@@ -984,7 +991,7 @@ Focus on directly answering what the user asked for.""",
             formatted_response = response.content[0].text
             
             # Add metadata footer
-            formatted_response += f"\n\n---\n*🤖 Processed by AI • {pd.Timestamp.now().strftime('%H:%M:%S')}*"
+            formatted_response += f"\n\n---\n*🤖 Processed by AI • {get_current_time().strftime('%H:%M:%S')}*"
             
             return formatted_response
             

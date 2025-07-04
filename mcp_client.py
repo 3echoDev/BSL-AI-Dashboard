@@ -11,10 +11,19 @@ import sseclient
 import re
 from config import get_mcp_server_url, get_health_check_url, MCP_SERVER_CONFIG
 from ai_processor import AIProcessor
+import pytz
+from urllib.parse import urljoin
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set timezone for Singapore
+SGT = pytz.timezone('Asia/Singapore')
+
+def get_current_time():
+    """Get current time in Singapore timezone"""
+    return datetime.now(SGT)
 
 class MCPClientError(Exception):
     """Custom exception for MCP client errors"""
@@ -617,7 +626,7 @@ class MCPClient:
                                     "success": True,
                                     "response": data.get('result', {}),
                                     "result": data.get('result', {}),  # Store for AI processing
-                                    "timestamp": datetime.now().isoformat(),
+                                    "timestamp": get_current_time().isoformat(),
                                     "attempt": attempt
                                 }
                             elif 'content' in data:
@@ -654,14 +663,14 @@ class MCPClient:
                 return {
                     "success": True,
                     "response": full_response,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": get_current_time().isoformat(),
                     "attempt": attempt
                 }
             else:
                 return {
                     "success": True,
                     "response": "Message sent successfully (no response received yet)",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": get_current_time().isoformat(),
                     "attempt": attempt
                 }
                 
@@ -709,14 +718,14 @@ class MCPClient:
                     return {
                         "success": True,
                         "response": data.get("response", str(data)),
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": get_current_time().isoformat(),
                         "attempt": attempt
                     }
                 except json.JSONDecodeError:
                     return {
                         "success": True,
                         "response": response.text,
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": get_current_time().isoformat(),
                         "attempt": attempt
                     }
             else:
@@ -793,7 +802,7 @@ class MCPClient:
             return {
                 "success": True,
                 "response": formatted_response,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": get_current_time().isoformat(),
                 "metadata": metadata
             }
             
