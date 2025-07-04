@@ -23,13 +23,13 @@ class MCPClientError(Exception):
 class MCPClient:
     """Client for interacting with MCP (Model Context Protocol) servers"""
     
-    def __init__(self, server_url: Optional[str] = None, openai_api_key: Optional[str] = None):
+    def __init__(self, server_url: Optional[str] = None, claude_api_key: Optional[str] = None):
         """
         Initialize MCP client
         
         Args:
             server_url: Optional custom server URL, defaults to config value
-            openai_api_key: Optional OpenAI API key for AI processing
+            claude_api_key: Optional Claude API key for AI processing
         """
         self.base_url = MCP_SERVER_CONFIG["base_url"]
         self.sse_url = get_mcp_server_url()
@@ -41,9 +41,9 @@ class MCPClient:
         
         # Initialize AI processor if API key provided
         self.ai_processor = None
-        if openai_api_key:
+        if claude_api_key:
             try:
-                self.ai_processor = AIProcessor(openai_api_key)
+                self.ai_processor = AIProcessor(claude_api_key)
                 logger.info("AI processor initialized successfully")
             except Exception as e:
                 logger.warning(f"Could not initialize AI processor: {e}")
@@ -60,99 +60,220 @@ class MCPClient:
             'Content-Type': 'application/json'
         })
         
-        # Define available tools and their patterns
-        # Let's try common variations of tool names that might exist in your n8n setup
+        # Enhanced tool patterns for both Record Agent and Agent workflow tools
         self.tool_patterns = {
-            r'(?i)\b(list\s+do|list\s+delivery\s+orders?|show\s+do|show\s+delivery\s+orders?)\b': {
-                'tool': 'list_do',  # Try simpler name first
-                'alternatives': ['list_delivery_orders', 'listDO', 'list-do', 'get_delivery_orders'],
-                'description': 'Returns a list of all existing Delivery Orders (DOs) with status, ID, and dates.'
+            # Record Agent Tools (Google Sheets based)
+            
+            # Delivery Order patterns
+            r'(?i)\b(check\s+do\b|list\s+do\b|show\s+do\b|delivery\s+order|check\s+delivery\s+order)\b': {
+                'tool': 'Check_DO',
+                'type': 'record_agent',
+                'description': 'Get rows from Delivery Order sheet in Google Sheets'
             },
-            r'(?i)\b(change\s+.*status.*DO-\w+.*(?:approved|pending|rejected|completed))\b': {
-                'tool': 'update_status',
-                'alternatives': ['update_delivery_order_status', 'updateStatus', 'change_status'],
-                'description': 'Updates status of {DO_number} to specified status'
-            },
-            r'(?i)\b(generate\s+do|create\s+do|generate\s+delivery\s+order|create\s+delivery\s+order)\b': {
-                'tool': 'generate_do',
-                'alternatives': ['generate_delivery_order', 'generateDO', 'create_do'],
-                'description': 'Triggers generation of corresponding DO PDF'
-            },
+            
+            # Other Record Agent Tools
             r'(?i)\b(check\s+holding\s+area|list\s+holding\s+area|show\s+holding\s+area|holding\s+area)\b': {
-                'tool': 'holding_area',
-                'alternatives': ['check_holding_area', 'list_holding_area', 'holdingArea', 'get_holding_area'],
+                'tool': 'Check_Holding_Area',
+                'type': 'record_agent',
                 'description': 'Displays all items or orders currently in the holding area queue'
             },
-            r'(?i)\b(generate\s+invoice|create\s+invoice)\b': {
-                'tool': 'generate_invoice',
-                'alternatives': ['generateInvoice', 'create_invoice'],
-                'description': 'Triggers generation of corresponding Invoice PDF'
+            r'(?i)\b(check\s+full\s+treatment|list\s+treatment|show\s+treatment|treatment\s+parts)\b': {
+                'tool': 'Check_Full_Treatment',
+                'type': 'record_agent',
+                'description': 'Get rows from Full Treatment sheet in Google Sheets'
             },
-            r'(?i)\b(generate\s+po|create\s+po|generate\s+purchase\s+order|create\s+purchase\s+order)\b': {
-                'tool': 'generate_po',
-                'alternatives': ['generate_purchase_order', 'generatePO', 'create_po'],
-                'description': 'Triggers generation of corresponding PO PDF'
-            }
+            r'(?i)\b(check\s+full\s+ncr|list\s+ncr|show\s+ncr|ncr\s+list|non[\s-]conformance|ncr\s+report)\b': {
+                'tool': 'Check_full_ncr',
+                'type': 'record_agent',
+                'description': 'Get NCR (Non-Conformance Report) list'
+            },
+            
+            # Agent Workflow Tools - Admin Functions
+            r'(?i)\b(generate\s+do|create\s+do|generate\s+delivery\s+order|create\s+delivery\s+order)\b': {
+                'tool': 'Agent',
+                'type': 'agent_workflow',
+                'sub_function': 'generate_do',
+                'description': 'Generate a new Delivery Order (DO) by collecting required customer and product details'
+            },
+            r'(?i)\b(do\s+download\s+link|download\s+do|get\s+do\s+link|do\s+link)\b': {
+                'tool': 'Agent',
+                'type': 'agent_workflow',
+                'sub_function': 'do_download_link',
+                'description': 'Retrieve the download link for a generated DO'
+            },
+            r'(?i)\b(parse\s+supplier\s+do|log\s+supplier\s+do|upload\s+supplier\s+delivery|supplier\s+delivery\s+order)\b': {
+                'tool': 'Agent',
+                'type': 'agent_workflow',
+                'sub_function': 'parse_and_log_supplier_delivery_order',
+                'description': 'Parse and log the latest supplier delivery order PDF'
+            },
+            
+            # Agent Workflow Tools - Account Functions
+            r'(?i)\b(approve\s+po|approve\s+purchase\s+order|po\s+approval)\b': {
+                'tool': 'Agent',
+                'type': 'agent_workflow',
+                'sub_function': 'approve_po',
+                'description': 'Approve a purchase order in the spreadsheet'
+            },
+            r'(?i)\b(partial\s+po|partial\s+approval|po\s+partial)\b': {
+                'tool': 'Agent',
+                'type': 'agent_workflow',
+                'sub_function': 'partial_po',
+                'description': 'Set partial approval for a purchase order'
+            },
+            r'(?i)\b(reject\s+po|reject\s+purchase\s+order|po\s+rejection)\b': {
+                'tool': 'Agent',
+                'type': 'agent_workflow',
+                'sub_function': 'reject_po',
+                'description': 'Reject a purchase order'
+            },
+            r'(?i)\b(usd\s+to\s+sgd|exchange\s+rate|currency\s+rate|mas\s+rate)\b': {
+                'tool': 'Agent',
+                'type': 'agent_workflow',
+                'sub_function': 'get_usd_to_sgd_rate',
+                'description': 'Get the latest USD to SGD exchange rate from MAS API'
+            },
+            
+
         }
         
         logger.info(f"MCP Client initialized with base URL: {self.base_url}")
         logger.info(f"SSE URL: {self.sse_url}")
         logger.info(f"Messages URL: {self.messages_url}")
+        logger.info(f"Routing configured with {len(self.tool_patterns)} tool patterns (server-verified tools only)")
     
     def _map_query_to_tool(self, message: str) -> Tuple[str, Dict]:
         """
-        Map user query to appropriate MCP tool
+        Map user query to appropriate MCP tool with enhanced routing
         
         Args:
             message: User's query
             
         Returns:
-            Tuple of (tool_name, arguments)
+            Tuple of (tool_name, tool_info)
         """
         message_lower = message.lower().strip()
+        
+        # Enhanced debugging for DO/PO routing
+        logger.info(f"🔍 ROUTING DEBUG: Input query: '{message}' | Lowercase: '{message_lower}'")
         
         for pattern, tool_info in self.tool_patterns.items():
             if re.search(pattern, message):
                 tool_name = tool_info['tool']
-                arguments = {}
                 
-                # Extract specific parameters based on the tool
-                if tool_name == 'update_delivery_order_status':
-                    # Extract DO number and status
-                    do_match = re.search(r'DO-(\w+)', message, re.IGNORECASE)
-                    status_match = re.search(r'\b(approved|pending|rejected|completed)\b', message, re.IGNORECASE)
-                    
-                    if do_match:
-                        arguments['do_number'] = f"DO-{do_match.group(1)}"
-                    if status_match:
-                        arguments['status'] = status_match.group(1).upper()
+                # Special logging for DO/PO routing
+                if 'DO' in tool_name or 'PO' in tool_name:
+                    logger.info(f"🎯 CRITICAL MATCH: Pattern '{pattern}' matched query '{message}' → Tool: '{tool_name}'")
                 
-                elif tool_name in ['generate_delivery_order', 'generate_invoice', 'generate_purchase_order']:
-                    # These might need additional parameters - can be extracted from message
-                    # For now, pass the original message for context
-                    arguments['context'] = message
+                # Extract specific parameters based on the tool and query
+                arguments = self._extract_tool_arguments(message, tool_info)
                 
-                logger.info(f"Mapped query to tool: {tool_name} with arguments: {arguments}")
-                return tool_name, arguments
+                # Add tool info for routing decisions
+                tool_info_with_args = {
+                    **tool_info,
+                    'arguments': arguments,
+                    'original_query': message
+                }
+                
+                logger.info(f"✅ FINAL ROUTING: Query '{message}' → Tool: {tool_name} (type: {tool_info.get('type', 'unknown')}) with arguments: {arguments}")
+                return tool_name, tool_info_with_args
         
-        # If no specific tool is matched, return a default or error
-        logger.warning(f"No tool mapping found for query: {message}")
-        return "unknown_tool", {"message": message}
+        # Default to Agent for unmatched queries
+        logger.info(f"⚠️ NO MATCH FOUND: Routing to default Agent for query: {message}")
+        return "Agent", {
+            "tool": "Agent",
+            "type": "agent_workflow",
+            "sub_function": "general_query",
+            "description": "General query processing",
+            "arguments": {"input": message},
+            "original_query": message
+        }
     
-    def _get_tool_alternatives(self, tool_name: str) -> List[str]:
+    def _extract_tool_arguments(self, message: str, tool_info: Dict) -> Dict:
+        """Extract specific arguments based on tool type and query"""
+        arguments = {}
+        
+        # Extract common patterns
+        if tool_info.get('sub_function') == 'approve_po':
+            # Extract PO number
+            po_match = re.search(r'po[#\s\-]*(\w+)', message, re.IGNORECASE)
+            if po_match:
+                arguments['POnumber'] = po_match.group(1)
+        
+        elif tool_info.get('sub_function') == 'partial_po':
+            # Extract PO number and quantity
+            po_match = re.search(r'po[#\s\-]*(\w+)', message, re.IGNORECASE)
+            qty_match = re.search(r'(\d+)', message)
+            if po_match:
+                arguments['POnumber'] = po_match.group(1)
+            if qty_match:
+                arguments['partial_qty'] = qty_match.group(1)
+        
+        elif tool_info.get('sub_function') == 'reject_po':
+            # Extract PO number
+            po_match = re.search(r'po[#\s\-]*(\w+)', message, re.IGNORECASE)
+            if po_match:
+                arguments['POnumber'] = po_match.group(1)
+        
+        elif tool_info.get('sub_function') == 'do_download_link':
+            # Extract DO number
+            do_match = re.search(r'do[#\s\-]*(\w+)', message, re.IGNORECASE)
+            if do_match:
+                arguments['DO_Number'] = do_match.group(1)
+        
+        elif tool_info.get('type') == 'agent_workflow':
+            # For agent workflow tools, pass the query as input
+            arguments['input'] = message
+        
+        return arguments
+    
+    def _map_query_to_specific_tool(self, message: str) -> str:
         """
-        Get alternative tool names for a given tool
+        Map user queries to specific tool names discovered from the server
+        Enhanced version with better routing logic
         
         Args:
-            tool_name: The primary tool name
+            message: User query
             
         Returns:
-            List of alternative tool names
+            Tool name to call
         """
-        for pattern, tool_info in self.tool_patterns.items():
-            if tool_info['tool'] == tool_name:
-                return tool_info.get('alternatives', [])
-        return []
+        # Use the enhanced mapping system
+        tool_name, tool_info = self._map_query_to_tool(message)
+        
+        # Log the routing decision
+        logger.info(f"Routing query '{message[:50]}...' to tool: {tool_name} "
+                   f"(type: {tool_info.get('type', 'unknown')})")
+        
+        return tool_name
+    
+    def get_available_commands(self) -> Dict[str, str]:
+        """
+        Get a dictionary of available commands based on actual server-side tools
+        
+        Returns:
+            Dict mapping command categories to descriptions
+        """
+        commands = {
+            "📊 Record Agent Tools": {
+                "Check DO": "Get delivery order records (use 'check do')", 
+                "Check Holding Area": "Get items currently in holding area",
+                "Check Full Treatment": "Get treatment parts information",
+                "Check Full NCR": "Get non-conformance report list"
+            },
+            "🏭 Admin Functions": {
+                "Generate DO": "Create new delivery order",
+                "DO Download Link": "Get download link for generated DO",
+                "Parse Supplier DO": "Upload and log supplier delivery order PDF"
+            },
+            "💰 Account Functions": {
+                "Approve PO": "Approve purchase order (e.g., 'approve po 12345')",
+                "Partial PO": "Set partial approval (e.g., 'partial po 12345 qty 10')",
+                "Reject PO": "Reject purchase order (e.g., 'reject po 12345')",
+                "USD to SGD Rate": "Get latest exchange rate from MAS"
+            }
+        }
+        return commands
     
     def _should_handle_with_ai_only(self, message: str) -> bool:
         """
@@ -170,7 +291,9 @@ class MCPClient:
             'overdue', 'analyze', 'analysis', 'summary', 'summarize',
             'count', 'total', 'group by', 'filter', 'sort',
             'above result', 'previous result', 'that result', 'from above',
-            'the data', 'this data', 'those items', 'these items'
+            'the data', 'this data', 'those items', 'these items',
+            'more records', 'more data', 'continue', 'next', 'additional',
+            'show more', 'give more', 'expand', 'full list', 'complete list'
         ]
         
         message_lower = message.lower()
@@ -184,46 +307,42 @@ class MCPClient:
         
         return (has_conversational_keywords and has_previous_data) or is_table_request
     
-    def _map_query_to_specific_tool(self, message: str) -> str:
+    def get_tool_info(self, message: str) -> Dict:
         """
-        Map user queries to specific tool names discovered from the server
+        Get detailed information about which tool would handle a query
         
         Args:
-            message: User query
+            message: User's query
             
         Returns:
-            Tool name to call
+            Dict containing tool information
         """
-        message_lower = message.lower().strip()
+        tool_name, tool_info = self._map_query_to_tool(message)
         
-        # Direct mapping to server tools (from tools/list response)
-        if any(keyword in message_lower for keyword in ['holding area', 'holding']):
-            return 'Check_Holding_Area'
-        elif any(keyword in message_lower for keyword in ['check do', 'list do', 'delivery order']):
-            return 'Check_DO'
-        elif any(keyword in message_lower for keyword in ['treatment', 'full treatment']):
-            return 'Check_Full_Treatment'
-        elif any(keyword in message_lower for keyword in ['ncr', 'non-conformance', 'non conformance', 'check ncr', 'ncr queries', 'ncr list']):
-            return 'Check_full_ncr'
-        else:
-            # Default to Agent tool for complex queries
-            return 'Agent'
+        return {
+            "tool_name": tool_name,
+            "tool_type": tool_info.get('type', 'unknown'),
+            "sub_function": tool_info.get('sub_function', None),
+            "description": tool_info.get('description', ''),
+            "arguments": tool_info.get('arguments', {}),
+            "will_use_ai": self.ai_processor is not None
+        }
     
-    def get_available_commands(self) -> Dict[str, str]:
+    def _get_tool_alternatives(self, tool_name: str) -> List[str]:
         """
-        Get a dictionary of available commands based on actual server tools
+        Get alternative tool names for a given tool (for backward compatibility)
+        
+        Args:
+            tool_name: The primary tool name
         
         Returns:
-            Dict mapping command examples to descriptions
+            List of alternative tool names
         """
-        commands = {
-            "Check Holding Area": "Get rows from Holding Area sheet in Google Sheets",
-            "Check DO": "Get rows from Delivery Order sheet in Google Sheets", 
-            "Check Full Treatment": "Get rows from Full Treatment sheet in Google Sheets",
-            "Check Full NCR": "Get NCR (Non-Conformance Report) list (direct tool)",
-            "General Query": "Ask complex questions (routed through AI Agent)"
-        }
-        return commands
+        alternatives = []
+        for pattern, tool_info in self.tool_patterns.items():
+            if tool_info['tool'] == tool_name:
+                alternatives.append(tool_info.get('description', ''))
+        return alternatives
     
     def _get_session_id(self) -> Optional[str]:
         """
@@ -338,6 +457,9 @@ class MCPClient:
                 "error": "Message cannot be empty"
             }
         
+        # Get tool information for routing decisions
+        tool_name, tool_info = self._map_query_to_tool(message)
+        
         # Check if this is a conversational query that should be handled by AI directly
         # (like "table format", "show overdue", "analyze", etc.)
         if self.ai_processor and self._should_handle_with_ai_only(message):
@@ -372,14 +494,16 @@ class MCPClient:
         
         # If we have AI processor, let it handle ALL formatting (like Claude Desktop)
         if self.ai_processor and raw_result and raw_result.get("success"):
-            logger.info(f"Processing response with OpenAI for user-friendly formatting...")
+            logger.info(f"Processing response with Claude for user-friendly formatting...")
+            logger.info(f"Tool used: {tool_name} (type: {tool_info.get('type', 'unknown')})")
             
             try:
-                # Let OpenAI format the response into human-readable text
+                # Let Claude format the response into human-readable text
                 ai_result = self.ai_processor.process_mcp_response(
                     message,
                     raw_result,
-                    conversation_context or []
+                    conversation_context or [],
+                    tool_info  # Pass tool context so AI knows which tool was called
                 )
                 
                 # Store the raw result for future reference
@@ -439,16 +563,19 @@ class MCPClient:
                         # Step 3: Send message to messages endpoint
                         messages_url = f"{self.messages_url}?sessionId={session_id}"
                         
-                        # Based on tools discovery, we can call specific tools directly
-                        # Map queries to the correct tool names from the server
-                        tool_name = self._map_query_to_specific_tool(message)
+                        # Use enhanced mapping system to determine tool and arguments
+                        tool_name, tool_info = self._map_query_to_tool(message)
                         
-                        # Set arguments based on tool type
-                        if tool_name == 'Agent':
-                            # Agent tool expects "input" parameter (not "query")
+                        # Set arguments based on tool type and extracted parameters
+                        if tool_info.get('type') == 'agent_workflow':
+                            # Agent workflow tools expect "input" parameter
                             arguments = {"input": message}
+                            
+                            # Add specific arguments if extracted
+                            if tool_info.get('arguments'):
+                                arguments.update(tool_info['arguments'])
                         else:
-                            # Google Sheets tools don't need arguments
+                            # Record Agent tools (Google Sheets) don't need arguments
                             arguments = {}
                         
                         payload = {
@@ -460,6 +587,9 @@ class MCPClient:
                                 "arguments": arguments
                             }
                         }
+                        
+                        logger.info(f"Calling tool: {tool_name} (type: {tool_info.get('type', 'unknown')}) "
+                                   f"with arguments: {arguments}")
                         
                         logger.info(f"Sending message to: {messages_url}")
                         

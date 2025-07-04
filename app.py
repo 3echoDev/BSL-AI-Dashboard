@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import os
+import base64
 from datetime import datetime
 import uuid
 from typing import Dict, List, Optional
@@ -12,6 +13,11 @@ load_dotenv()
 # Import custom modules
 from config import get_app_config, get_chat_config, get_mcp_server_url, get_health_check_url
 from mcp_client import MCPClient
+
+def get_base64_image(image_path):
+    """Convert image to base64 string for embedding in HTML"""
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
 
 # Configure the page
 app_config = get_app_config()
@@ -26,15 +32,15 @@ def initialize_session_state():
     if "conversation_id" not in st.session_state:
         st.session_state.conversation_id = str(uuid.uuid4())
     if "mcp_client" not in st.session_state:
-        # Initialize with OpenAI API key from environment variable or Streamlit secrets
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if not openai_key:
+        # Initialize with Claude API key from environment variable or Streamlit secrets
+        claude_key = os.getenv('ANTHROPIC_API_KEY')
+        if not claude_key:
             try:
                 # Try Streamlit secrets (for Streamlit Cloud deployment)
-                openai_key = st.secrets["OPENAI_API_KEY"]
+                claude_key = st.secrets["ANTHROPIC_API_KEY"]
             except (KeyError, FileNotFoundError):
-                st.warning("⚠️ OpenAI API key not found. Set OPENAI_API_KEY environment variable or add it to Streamlit secrets for AI features.")
-        st.session_state.mcp_client = MCPClient(openai_api_key=openai_key)
+                st.warning("⚠️ Claude API key not found. Set ANTHROPIC_API_KEY environment variable or add it to Streamlit secrets for AI features.")
+        st.session_state.mcp_client = MCPClient(claude_api_key=claude_key)
     if "chat_config" not in st.session_state:
         st.session_state.chat_config = chat_config
 
@@ -49,18 +55,39 @@ def display_chat_message(message: Dict, is_user: bool = True):
                 
                 # Check if this is an AI-generated response with special formatting
                 source = message.get("source", "")
-                if source in ["ai_processor", "ai_table_formatter"]:
+                tool_used = message.get("tool_used", "")
+                tool_type = message.get("tool_type", "")
+                
+                if source in ["ai_processor", "ai_table_formatter", "claude_formatted", "agent_workflow_fallback"]:
                     # Display AI responses with markdown support
                     st.markdown(content)
-                    if source == "ai_table_formatter":
-                        st.success("🤖 Formatted by AI")
+                    
+                    # Show appropriate status indicators
+                    if source == "claude_formatted":
+                        if tool_type == "agent_workflow":
+                            st.success("🤖 Formatted by Claude • Agent Workflow")
+                        elif tool_type == "record_agent":
+                            st.success("🤖 Formatted by Claude • Record Agent")
+                        else:
+                            st.success("🤖 Formatted by Claude")
+                    elif source == "agent_workflow_fallback":
+                        st.info("⚡ Agent Workflow • Fallback Formatting")
+                    elif source == "ai_table_formatter":
+                        st.success("📊 Table formatted by AI")
                     elif source == "ai_processor":
                         st.info("🧠 Processed by AI")
+                        
+                    # Show tool information if available
+                    if tool_used and tool_used != "unknown":
+                        st.caption(f"Tool: {tool_used}")
+                        
                 else:
                     # Regular MCP response - try to format JSON nicely
                     try:
                         if content.startswith('[') and len(content) > 100:
                             st.info("📊 Raw data received - try asking for 'table format' for better display")
+                        elif content.startswith('{') and 'content' in content:
+                            st.warning("🔧 Raw MCP response - enable AI formatting for better display")
                         st.write(content)
                     except:
                         st.write(content)
@@ -75,90 +102,69 @@ def display_chat_message(message: Dict, is_user: bool = True):
 def main():
     initialize_session_state()
     
-    # Header
+    # Simple compact title
     st.title("🤖 BSL AI Dashboard")
     st.markdown("---")
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Configuration")
-        
-        # Server status
-        st.subheader("Server Status")
-        health_status = st.session_state.mcp_client.health_check()
-        
-        if health_status["status"] == "healthy":
-            st.success(f"🟢 {health_status['message']}")
-            if "response_time" in health_status:
-                st.caption(f"Response time: {health_status['response_time']:.3f}s")
-        elif health_status["status"] == "timeout":
-            st.warning(f"🟡 {health_status['message']}")
-        else:
-            st.error(f"🔴 {health_status['message']}")
-        
-        # AI Status
-        if hasattr(st.session_state.mcp_client, 'ai_processor') and st.session_state.mcp_client.ai_processor:
-            st.success("🤖 AI Enhanced Mode Active")
-            st.caption("Can handle complex queries, data formatting, and analysis")
-        else:
-            st.warning("🔧 Basic Mode Only")
-            st.caption("Direct tool calls only")
-        
-        st.info(f"**Server URL:** {get_mcp_server_url()}")
+        # Add logos at the top of sidebar
+        st.markdown("""
+        <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 20px 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        ">
+            <div style="
+                background: rgba(255,255,255,0.9);
+                padding: 8px;
+                border-radius: 10px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            ">
+                <img src="data:image/png;base64,{}" style="height: 40px; width: auto;" />
+            </div>
+            <span style="font-size: 20px; color: #666; font-weight: 600;">×</span>
+            <div style="
+                background: rgba(255,255,255,0.9);
+                padding: 8px;
+                border-radius: 10px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            ">
+                <img src="data:image/jpeg;base64,{}" style="height: 40px; width: auto;" />
+            </div>
+        </div>
+        """.format(
+            get_base64_image("image/3echo.png"),
+            get_base64_image("image/bsl.jpg")
+        ), unsafe_allow_html=True)
         
         # Available commands
         st.subheader("Available Commands")
         commands = st.session_state.mcp_client.get_available_commands()
         with st.expander("📋 Show Commands", expanded=False):
-            for cmd, desc in commands.items():
-                st.write(f"**{cmd}**")
-                st.caption(desc)
-                st.write("")
-        
-        # Debug: Server Tools Discovery
-        st.subheader("🔍 Debug Tools")
-        if st.button("Discover Server Tools"):
-            with st.spinner("Querying server for available tools..."):
-                tools_info = st.session_state.mcp_client.get_available_tools()
+            # Display commands by category with enhanced structure
+            for category, category_commands in commands.items():
+                st.markdown(f"**{category}**")
                 
-                if tools_info["success"]:
-                    if "tools" in tools_info:
-                        st.success("✅ Found server tools!")
-                        st.json(tools_info["tools"])
-                    else:
-                        st.info("Server response:")
-                        st.text(tools_info.get("response", "No response"))
+                if isinstance(category_commands, dict):
+                    for command, description in category_commands.items():
+                        st.markdown(f"  • **{command}**: {description}")
                 else:
-                    st.error(f"❌ Failed to get tools: {tools_info['error']}")
-        
-        # Conversation controls
-        st.subheader("Conversation")
-        if st.button("🗑️ Clear Chat"):
-            st.session_state.messages = []
-            st.session_state.conversation_id = str(uuid.uuid4())
-            st.rerun()
-        
-        st.info(f"**Conversation ID:** {st.session_state.conversation_id[:8]}...")
-        
-        # Settings
-        st.subheader("Settings")
-        auto_scroll = st.checkbox("Auto-scroll to bottom", 
-                                 value=st.session_state.chat_config["auto_scroll"])
-        show_timestamps = st.checkbox("Show timestamps", 
-                                     value=st.session_state.chat_config["show_timestamps"])
-        stream_responses = st.checkbox("Stream responses", value=True)
-        
-        # Advanced settings
-        with st.expander("Advanced Settings"):
-            response_timeout = st.slider("Response timeout (seconds)", 
-                                       min_value=10, max_value=60, 
-                                       value=st.session_state.chat_config["response_timeout"])
-            max_messages = st.slider("Max messages in history", 
-                                   min_value=10, max_value=200, 
-                                   value=st.session_state.chat_config["max_messages"])
+                    st.markdown(f"  {category_commands}")
+                
+                st.markdown("")
     
     # Main chat interface
     st.header("💬 Chat Interface")
+    
+    # Set default values for removed configuration options
+    auto_scroll = st.session_state.chat_config.get("auto_scroll", True)
+    stream_responses = True
+    max_messages = st.session_state.chat_config.get("max_messages", 50)
     
     # Display chat history
     chat_container = st.container()
