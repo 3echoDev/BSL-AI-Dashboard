@@ -1202,9 +1202,9 @@ Ask for specific filters or analysis like:
                         if isinstance(item, dict) and 'text' in item:
                             text = item['text']
                             if "Input was rejected for safety reasons" in text:
-                                return "⚠️ Please rephrase your question in a clearer way and try again."
+                                return "⚠️ Please refer to 'Available Commands' and try again."
                             if "Please rephrase and try again" in text:
-                                return "⚠️ Please try asking your question differently."
+                                return "⚠️ Please refer to 'Available Commands' and try again."
                 
                 # Handle other error messages in content
                 if 'content' in data and isinstance(data['content'], str):
@@ -1231,9 +1231,9 @@ Ask for specific filters or analysis like:
         except json.JSONDecodeError:
             # Not JSON, check for common error patterns in plain text
             if "Input was rejected for safety reasons" in raw_text:
-                return "⚠️ Please rephrase your question in a clearer way and try again."
+                return "⚠️ Please refer to 'Available Commands' and try again."
             if "Please rephrase and try again" in raw_text:
-                return "⚠️ Please try asking your question differently."
+                return "⚠️ Please refer to 'Available Commands' and try again."
             if "error" in raw_text.lower():
                 return f"🚫 {raw_text}"
             
