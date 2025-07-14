@@ -13,6 +13,7 @@ from config import get_mcp_server_url, get_health_check_url, MCP_SERVER_CONFIG
 from ai_processor import AIProcessor
 import pytz
 from urllib.parse import urljoin
+import pandas as pd
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -463,7 +464,7 @@ class MCPClient:
         if not message.strip():
             return {
                 "success": False,
-                "error": "Message cannot be empty"
+                "error": "Please enter a question or command"
             }
         
         # Get tool information for routing decisions
@@ -498,7 +499,7 @@ class MCPClient:
                 if attempt == self.max_retries - 1:
                     return {
                         "success": False,
-                        "error": f"Failed to get data from MCP server: {str(e)}"
+                        "error": "Unable to connect to server. Please try again in a moment."
                     }
         
         # If we have AI processor, let it handle ALL formatting (like Claude Desktop)
@@ -533,7 +534,7 @@ class MCPClient:
         # Fallback if no raw result
         return {
             "success": False,
-            "error": "Failed to get response from MCP server"
+            "error": "No response received. Please try a different question."
         }
     
     def _send_query_with_sse(self, message: str, conversation_id: str, attempt: int) -> Dict[str, Any]:
@@ -770,22 +771,10 @@ class MCPClient:
                                 full_response += str(data['text'])
                             elif 'response' in data:
                                 full_response += str(data['response'])
-                            elif 'data' in data:
-                                full_response += str(data['data'])
                             else:
-                                # If no recognized content field, use the whole object
                                 full_response += str(data)
-                            
-                            # Store metadata
-                            if 'type' in data:
-                                metadata['type'] = data['type']
-                            if 'status' in data:
-                                metadata['status'] = data['status']
-                                
                         else:
-                            # If not a dict, just append the data
                             full_response += str(data)
-                            
                     except json.JSONDecodeError:
                         # If not JSON, treat as plain text
                         full_response += event.data
@@ -793,7 +782,7 @@ class MCPClient:
             if not full_response.strip():
                 return {
                     "success": False,
-                    "error": "Received empty response from server"
+                    "error": "No response received. Please try rephrasing your question."
                 }
             
             # Auto-format JSON responses for better readability
@@ -810,7 +799,7 @@ class MCPClient:
             logger.error(f"Failed to parse SSE response: {str(e)}")
             return {
                 "success": False,
-                "error": f"Failed to parse server response: {str(e)}"
+                "error": "Unable to process the response. Please try again."
             }
     
     def _format_response_for_display(self, response: str, metadata: Dict) -> str:
@@ -1156,3 +1145,180 @@ def quick_query(message: str, conversation_id: Optional[str] = None) -> Dict[str
         return client.send_query(message, conversation_id)
     finally:
         client.close() 
+
+def _extract_json_from_mcp_response(self, mcp_response: Dict) -> Optional[List[Dict]]:
+        """Extract JSON data from MCP response structure - Enhanced for Agent workflow responses"""
+        try:
+            logger.info(f"Extracting JSON from MCP response: {str(mcp_response)[:200]}...")
+            
+            # First check for error messages
+            if isinstance(mcp_response, dict):
+                # Check for error in response field
+                if 'response' in mcp_response:
+                    response_data = mcp_response['response']
+                    if isinstance(response_data, dict) and 'content' in response_data:
+                        content = response_data['content']
+                        if isinstance(content, list) and len(content) > 0:
+                            first_item = content[0]
+                            if isinstance(first_item, dict) and 'text' in first_item:
+                                text = first_item['text']
+                                # Check for error patterns
+                                if "Input was rejected for safety reasons" in text:
+                                    return [{
+                                        "error": "Please rephrase your question in a clearer way and try again.",
+                                        "type": "error_response"
+                                    }]
+                                if "Please rephrase and try again" in text:
+                                    return [{
+                                        "error": "Please try asking your question differently.",
+                                        "type": "error_response"
+                                    }]
+            
+            # Method 1: Try direct dictionary access to 'response' field
+            if 'response' in mcp_response:
+                response_data = mcp_response['response']
+                logger.info(f"Found response field: {str(response_data)[:200]}...")
+                
+                # Handle Agent workflow response structure: {'content': [{'type': 'text', 'text': '[{"output": "..."}]'}]}
+                if isinstance(response_data, dict) and 'content' in response_data:
+                    content = response_data['content']
+                    logger.info(f"Found content field: {str(content)[:200]}...")
+                    
+                    if isinstance(content, list) and len(content) > 0:
+                        first_item = content[0]
+                        if isinstance(first_item, dict) and 'text' in first_item:
+                            text_data = first_item['text']
+                            logger.info(f"Found text data: {str(text_data)[:200]}...")
+                            
+                            # NEW: Handle Agent workflow "output" structure
+                            try:
+                                parsed_data = json.loads(text_data)
+                                logger.info(f"Parsed data: {type(parsed_data)}")
+                                
+                                # Check if it's Agent workflow format: [{"output": "..."}]
+                                if isinstance(parsed_data, list) and len(parsed_data) > 0:
+                                    first_parsed_item = parsed_data[0]
+                                    if isinstance(first_parsed_item, dict) and 'output' in first_parsed_item:
+                                        logger.info("🤖 Detected Agent workflow 'output' structure")
+                                        # Convert to a format that Claude can work with
+                                        formatted_data = [{
+                                            "result": first_parsed_item['output'],
+                                            "type": "agent_workflow_response",
+                                            "timestamp": pd.Timestamp.now().isoformat()
+                                        }]
+                                        return formatted_data
+                                    
+                                    # Check if it's triple-nested structure
+                                    if isinstance(first_parsed_item, dict) and 'text' in first_parsed_item:
+                                        inner_text = first_parsed_item['text']
+                                        logger.info(f"Found inner text: {str(inner_text)[:200]}...")
+                                        
+                                        # Second level: Parse the actual inventory data
+                                        actual_data = json.loads(inner_text)
+                                        logger.info(f"Successfully extracted {len(actual_data)} items from triple-nested structure")
+                                        
+                                        # Third level: Check if each item has a "result" field with JSON data
+                                        if (len(actual_data) > 0 and 
+                                            isinstance(actual_data[0], dict) and 
+                                            'result' in actual_data[0] and 
+                                            isinstance(actual_data[0]['result'], str)):
+                                            
+                                            logger.info("🔄 Detected nested JSON in 'result' fields, extracting...")
+                                            extracted_records = []
+                                            
+                                            for item in actual_data:
+                                                if 'result' in item and isinstance(item['result'], str):
+                                                    try:
+                                                        # Parse the JSON string inside the result field
+                                                        nested_record = json.loads(item['result'])
+                                                        extracted_records.append(nested_record)
+                                                    except json.JSONDecodeError as e:
+                                                        logger.warning(f"Failed to parse nested result JSON: {e}")
+                                                        # Keep the original item if parsing fails
+                                                        extracted_records.append(item)
+                                                else:
+                                                    extracted_records.append(item)
+                                            
+                                            logger.info(f"✅ Successfully extracted {len(extracted_records)} NCR records from nested results")
+                                            return extracted_records
+                                        
+                                        return actual_data
+                                    
+                                    # Check if it's standard data array
+                                    if isinstance(first_parsed_item, dict) and any(key in first_parsed_item for key in ['row_number', 'POnumber', 'productCode']):
+                                        logger.info(f"Successfully extracted {len(parsed_data)} items from standard array")
+                                        return parsed_data
+                                        
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"Failed to parse JSON structure: {e}")
+                                
+                                # Enhanced regex fallback for Agent workflow responses
+                                import re
+                                
+                                # Look for Agent workflow output pattern
+                                output_pattern = r'"output":\s*"([^"]*)"'
+                                output_match = re.search(output_pattern, text_data)
+                                if output_match:
+                                    output_text = output_match.group(1)
+                                    logger.info(f"🤖 Extracted Agent workflow output via regex: {output_text}")
+                                    return [{
+                                        "result": output_text,
+                                        "type": "agent_workflow_response", 
+                                        "extraction_method": "regex",
+                                        "timestamp": pd.Timestamp.now().isoformat()
+                                    }]
+                                
+                                # Standard regex fallback for inventory data
+                                json_match = re.search(r'\[{"row_number".*?}\]', text_data, re.DOTALL)
+                                if json_match:
+                                    try:
+                                        json_str = json_match.group(0)
+                                        # Clean up escaped characters
+                                        json_str = json_str.replace('\\"', '"').replace('\\n', '\n')
+                                        fallback_data = json.loads(json_str)
+                                        logger.info(f"Fallback regex extraction successful: {len(fallback_data)} items")
+                                        return fallback_data
+                                    except Exception as regex_e:
+                                        logger.warning(f"Regex fallback also failed: {regex_e}")
+            
+            # Method 2: Enhanced string-based regex extraction
+            response_text = str(mcp_response)
+            import re
+            
+            # Look for Agent workflow output in the entire response
+            output_pattern = r'"output":\s*"([^"]*)"'
+            output_match = re.search(output_pattern, response_text)
+            if output_match:
+                output_text = output_match.group(1)
+                logger.info(f"🤖 Found Agent workflow output in full response: {output_text}")
+                return [{
+                    "result": output_text,
+                    "type": "agent_workflow_response",
+                    "extraction_method": "full_response_regex",
+                    "timestamp": pd.Timestamp.now().isoformat()
+                }]
+            
+            # Look for deeply nested pattern: "text":"[{...}]"
+            nested_pattern = r'"text":"(\[{.*?}\])"'
+            nested_match = re.search(nested_pattern, response_text, re.DOTALL)
+            
+            if nested_match:
+                json_str = nested_match.group(1)
+                # Unescape the JSON
+                json_str = json_str.replace('\\"', '"').replace('\\n', '\n')
+                logger.info(f"Found nested pattern, trying to parse: {json_str[:200]}...")
+                
+                try:
+                    data = json.loads(json_str)
+                    if isinstance(data, list) and len(data) > 0:
+                        logger.info(f"Successfully parsed {len(data)} items via regex")
+                        return data
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse regex-extracted JSON: {e}")
+            
+            logger.warning("No JSON data could be extracted from MCP response")
+            return None
+            
+        except Exception as e:
+            logger.error(f"JSON extraction error: {e}")
+            return None 

@@ -1189,41 +1189,56 @@ Ask for specific filters or analysis like:
         if not raw_text:
             return "No data received from server."
         
-        # If this is still showing raw JSON structure, let's try to force Claude formatting
-        if '"content"' in raw_text and '"text"' in raw_text:
-            logger.info("Detected raw JSON structure, attempting forced Claude formatting...")
+        # Handle common error patterns
+        try:
+            # Try to parse as JSON first
+            data = json.loads(raw_text)
             
-            # Try to extract data one more time with a simpler approach
-            import re
-            json_match = re.search(r'\[{.*?}\]', raw_text, re.DOTALL)
-            if json_match:
-                try:
-                    json_str = json_match.group(0)
-                    # Clean up escaped characters
-                    json_str = json_str.replace('\\"', '"').replace('\\n', '\n')
-                    data = json.loads(json_str)
-                    
-                    if isinstance(data, list) and len(data) > 0:
-                        # Force Claude formatting as last resort
-                        logger.info(f"Forcing Claude formatting for {len(data)} items...")
-                        return self._basic_data_formatting(data)
-                        
-                except Exception as e:
-                    logger.warning(f"Final extraction attempt failed: {e}")
-        
-        # Basic cleanup
-        cleaned = raw_text.strip()
-        
-        # If it looks like JSON, try to make it more readable
-        if cleaned.startswith('{') or cleaned.startswith('['):
-            try:
-                # Try to parse and reformat JSON
-                data = json.loads(cleaned)
-                return json.dumps(data, indent=2)
-            except:
-                pass
-        
-        return cleaned
+            # Check for error patterns in JSON structure
+            if isinstance(data, dict):
+                # Handle safety rejection pattern
+                if 'content' in data and isinstance(data['content'], list):
+                    for item in data['content']:
+                        if isinstance(item, dict) and 'text' in item:
+                            text = item['text']
+                            if "Input was rejected for safety reasons" in text:
+                                return "⚠️ Please rephrase your question in a clearer way and try again."
+                            if "Please rephrase and try again" in text:
+                                return "⚠️ Please try asking your question differently."
+                
+                # Handle other error messages in content
+                if 'content' in data and isinstance(data['content'], str):
+                    return data['content']
+                
+                # Handle direct error messages
+                if 'error' in data:
+                    return f"🚫 {data['error']}"
+                
+                if 'message' in data:
+                    return f"ℹ️ {data['message']}"
+            
+            # If it's a list with text/type structure
+            if isinstance(data, list) and len(data) > 0:
+                if isinstance(data[0], dict):
+                    if 'text' in data[0]:
+                        return data[0]['text']
+                    if 'message' in data[0]:
+                        return data[0]['message']
+            
+            # If we got here and it's still JSON, format it nicely
+            return json.dumps(data, indent=2)
+            
+        except json.JSONDecodeError:
+            # Not JSON, check for common error patterns in plain text
+            if "Input was rejected for safety reasons" in raw_text:
+                return "⚠️ Please rephrase your question in a clearer way and try again."
+            if "Please rephrase and try again" in raw_text:
+                return "⚠️ Please try asking your question differently."
+            if "error" in raw_text.lower():
+                return f"🚫 {raw_text}"
+            
+            # Just return cleaned text if no patterns match
+            return raw_text.strip()
     
     def _basic_data_formatting(self, data: List[Dict]) -> str:
         """Basic fallback formatting"""

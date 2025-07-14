@@ -7,6 +7,7 @@ import uuid
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
 import pytz  # Add this import
+import json # Added for json.loads
 
 # Load environment variables from .env file
 load_dotenv()
@@ -82,6 +83,11 @@ def display_chat_message(message: Dict, is_user: bool = True):
             if message.get("success", True):
                 content = message["content"]
                 
+                # Check if this is an error response in content
+                if isinstance(content, dict) and content.get('type') == 'error_response':
+                    st.error(content.get('error', 'An error occurred'))
+                    return
+                
                 # Check if this is an AI-generated response with special formatting
                 source = message.get("source", "")
                 tool_used = message.get("tool_used", "")
@@ -113,15 +119,42 @@ def display_chat_message(message: Dict, is_user: bool = True):
                 else:
                     # Regular MCP response - try to format JSON nicely
                     try:
-                        if content.startswith('[') and len(content) > 100:
+                        # Check if this is a raw JSON error message
+                        if isinstance(content, str):
+                            try:
+                                data = json.loads(content)
+                                if isinstance(data, dict) and ('error' in data or 'message' in data):
+                                    error_msg = data.get('error') or data.get('message')
+                                    st.error(f"🚫 {error_msg}")
+                                    return
+                            except:
+                                pass
+                        
+                        if str(content).startswith('[') and len(str(content)) > 100:
                             st.info("📊 Raw data received - try asking for 'table format' for better display")
-                        elif content.startswith('{') and 'content' in content:
+                        elif str(content).startswith('{') and 'content' in str(content):
                             st.warning("🔧 Raw MCP response - enable AI formatting for better display")
                         st.write(content)
                     except:
                         st.write(content)
             else:
-                st.error(f"Error: {message.get('error', 'Unknown error')}")
+                # Get the error message
+                error_msg = message.get('error', 'Unknown error')
+                
+                # Clean up common error patterns
+                if "Input was rejected for safety reasons" in error_msg:
+                    st.error("⚠️ Please rephrase your question in a clearer way and try again.")
+                elif "Could not establish session" in error_msg:
+                    st.error("🔌 Connection issue - please try again in a moment.")
+                elif "Failed to get data from MCP server" in error_msg:
+                    st.error("🔄 Server communication error - please try again.")
+                elif "Timeout" in error_msg:
+                    st.error("⏳ Request took too long - please try again.")
+                elif "Empty response" in error_msg:
+                    st.error("📭 No data received - please try a different query.")
+                else:
+                    # For unknown errors, show a user-friendly message
+                    st.error(f"🚫 {error_msg}")
         
         # Add timestamp with source info
         timestamp = message.get("timestamp", get_current_time().isoformat())
