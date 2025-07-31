@@ -5,7 +5,7 @@ from typing import Dict, Any
 
 # MCP Server Configuration
 MCP_SERVER_CONFIG = {
-    "base_url": "https://threeecho.app.n8n.cloud/mcp/ClaudeDesktopMCP",
+    "base_url": "https://bslunifyone.app.n8n.cloud/mcp/ClaudeDesktopMCP",
     "sse_endpoint": "/sse",
     "messages_endpoint": "/messages",
     "health_endpoint": "/health",

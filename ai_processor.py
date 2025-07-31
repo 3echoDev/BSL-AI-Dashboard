@@ -87,7 +87,7 @@ class AIProcessor:
             # Extract JSON data from MCP response
             extracted_data = self._extract_json_from_mcp_response(mcp_response)
             
-            if extracted_data:
+            if extracted_data is not None and len(extracted_data) > 0:
                 logger.info(f"Successfully extracted {len(extracted_data)} items, formatting with Claude...")
                 
                 # Extract nested JSON from result fields if needed
@@ -112,6 +112,15 @@ class AIProcessor:
                     "timestamp": get_current_time().isoformat(),
                     "source": "claude_formatted",
                     "tool_type": tool_context.get('type') if tool_context else None
+                }
+            elif extracted_data is not None and len(extracted_data) == 0:
+                # Handle empty data case specifically
+                logger.info("Successfully extracted data but it's empty - returning user-friendly message")
+                return {
+                    "success": True,
+                    "response": "📭 No records found.",
+                    "timestamp": get_current_time().isoformat(),
+                    "source": "empty_data_handler"
                 }
             else:
                 logger.warning("No structured data extracted, using cleanup method")
@@ -1187,12 +1196,21 @@ Ask for specific filters or analysis like:
     def _clean_raw_response(self, raw_text: str) -> str:
         """Clean up raw response text"""
         if not raw_text:
-            return "No data received from server."
+            return "📭 No data found. Please try a different search."
         
         # Handle common error patterns
         try:
             # Try to parse as JSON first
             data = json.loads(raw_text)
+            
+            # Handle empty or null responses
+            if data is None:
+                return "📭 No data found. Please try a different search."
+            
+            # Handle empty arrays or objects
+            if (isinstance(data, list) and len(data) == 0) or \
+               (isinstance(data, dict) and len(data) == 0):
+                return "📭 No data found for your query. Please try a different search or check your parameters."
             
             # Check for error patterns in JSON structure
             if isinstance(data, dict):
@@ -1205,10 +1223,28 @@ Ask for specific filters or analysis like:
                                 return "⚠️ Please refer to 'Available Commands' and try again."
                             if "Please rephrase and try again" in text:
                                 return "⚠️ Please refer to 'Available Commands' and try again."
+                            
+                            # Handle empty array responses
+                            if text == "[]" or text == '[{"type":"text","text":"[]"}]' or \
+                               text == '{}' or text == '[{"type":"text","text":"{}"}]':
+                                return "📭 No data found for your query. Please try a different search or check your parameters."
                 
                 # Handle other error messages in content
                 if 'content' in data and isinstance(data['content'], str):
-                    return data['content']
+                    content_text = data['content']
+                    if content_text in ["[]", "{}", '[{"type":"text","text":"[]"}]', '[{"type":"text","text":"{}"}]']:
+                        return "📭 No data found for your query. Please try a different search or check your parameters."
+                    # Don't return raw JSON content
+                    try:
+                        # If content is JSON, format it nicely
+                        json_content = json.loads(content_text)
+                        if not json_content or \
+                           (isinstance(json_content, list) and len(json_content) == 0) or \
+                           (isinstance(json_content, dict) and len(json_content) == 0):
+                            return "📭 No data found for your query. Please try a different search or check your parameters."
+                    except:
+                        # If not JSON, return as is
+                        return content_text
                 
                 # Handle direct error messages
                 if 'error' in data:
@@ -1221,12 +1257,49 @@ Ask for specific filters or analysis like:
             if isinstance(data, list) and len(data) > 0:
                 if isinstance(data[0], dict):
                     if 'text' in data[0]:
-                        return data[0]['text']
+                        text = data[0]['text']
+                        if text in ["[]", "{}", '[{"type":"text","text":"[]"}]', '[{"type":"text","text":"{}"}]']:
+                            return "📭 No data found for your query. Please try a different search or check your parameters."
+                        # Try to parse the text as JSON
+                        try:
+                            json_text = json.loads(text)
+                            if not json_text or \
+                               (isinstance(json_text, list) and len(json_text) == 0) or \
+                               (isinstance(json_text, dict) and len(json_text) == 0):
+                                return "📭 No data found for your query. Please try a different search or check your parameters."
+                        except:
+                            # If not JSON, return as is
+                            return text
                     if 'message' in data[0]:
                         return data[0]['message']
             
-            # If we got here and it's still JSON, format it nicely
-            return json.dumps(data, indent=2)
+            # If we got here and have empty data structures, return friendly message
+            if not data or \
+               (isinstance(data, list) and len(data) == 0) or \
+               (isinstance(data, dict) and len(data) == 0):
+                return "📭 No data found for your query. Please try a different search or check your parameters."
+            
+            # If we got here and it's still JSON, try to extract a message
+            if isinstance(data, dict):
+                # Look for common message fields
+                for key in ['message', 'description', 'info', 'text', 'response']:
+                    if key in data and isinstance(data[key], str):
+                        return data[key]
+                
+                # If no message found but data is empty
+                if not any(data.values()):
+                    return "📭 No data found for your query. Please try a different search or check your parameters."
+            
+            # Last resort - if it's a small JSON, make it friendly
+            if len(str(data)) < 100:
+                return "📭 No data available. Please try a different search."
+            
+            # For larger JSON that we couldn't convert, return structured message
+            return """📊 Data received but needs formatting. 
+Please try:
+- Adding 'table format' to your query
+- Asking for specific information
+- Using a more specific search"""
             
         except json.JSONDecodeError:
             # Not JSON, check for common error patterns in plain text
@@ -1236,6 +1309,8 @@ Ask for specific filters or analysis like:
                 return "⚠️ Please refer to 'Available Commands' and try again."
             if "error" in raw_text.lower():
                 return f"🚫 {raw_text}"
+            if raw_text.strip() in ["[]", "{}", "null", "undefined", ""]:
+                return "📭 No data found for your query. Please try a different search or check your parameters."
             
             # Just return cleaned text if no patterns match
             return raw_text.strip()

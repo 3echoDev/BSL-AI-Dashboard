@@ -94,8 +94,19 @@ def display_chat_message(message: Dict, is_user: bool = True):
                 tool_type = message.get("tool_type", "")
                 
                 if source in ["ai_processor", "ai_table_formatter", "claude_formatted", "agent_workflow_fallback"]:
-                    # Display AI responses with markdown support
-                    st.markdown(content)
+                    # Display AI responses as plain text only - no formatting at all
+                    import re
+                    # Strip ALL markdown formatting for consistent font
+                    plain_content = content
+                    plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
+                    plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
+                    plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
+                    plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
+                    plain_content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', plain_content)  # Remove links
+                    plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
+                    plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
+                    # Use st.text for completely plain text display
+                    st.text(plain_content)
                     
                     # Show appropriate status indicators
                     if source == "claude_formatted":
@@ -127,23 +138,67 @@ def display_chat_message(message: Dict, is_user: bool = True):
                                     error_msg = data.get('error') or data.get('message')
                                     st.error(f"🚫 {error_msg}")
                                     return
+                                
+                                # Handle empty array responses
+                                if isinstance(data, dict) and 'content' in data:
+                                    content_list = data['content']
+                                    if isinstance(content_list, list) and len(content_list) > 0:
+                                        first_item = content_list[0]
+                                        if isinstance(first_item, dict) and 'text' in first_item:
+                                            text = first_item['text']
+                                            if text == "[]" or text == '[{"type":"text","text":"[]"}]':
+                                                st.info("📭 No data available at the moment.")
+                                                return
+                                
+                                # Handle direct empty array
+                                if isinstance(data, list) and len(data) == 0:
+                                    st.info("📭 No data available at the moment.")
+                                    return
+                                    
                             except:
                                 pass
+                        
+                        # Check for empty array in plain text
+                        if isinstance(content, str):
+                            if content.strip() == "[]" or content.strip() == '[{"type":"text","text":"[]"}]':
+                                st.info("📭 No data available at the moment.")
+                                return
                         
                         if str(content).startswith('[') and len(str(content)) > 100:
                             st.info("📊 Raw data received - try asking for 'table format' for better display")
                         elif str(content).startswith('{') and 'content' in str(content):
                             st.warning("🔧 Raw MCP response - enable AI formatting for better display")
-                        st.write(content)
+                        
+                        # Apply same plain text treatment to all responses for consistent font
+                        import re
+                        plain_content = str(content)
+                        plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
+                        plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
+                        plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
+                        plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
+                        plain_content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', plain_content)  # Remove links
+                        plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
+                        plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
+                        st.text(plain_content)
                     except:
-                        st.write(content)
+                        # Apply plain text treatment to fallback content too
+                        import re
+                        plain_content = str(content)
+                        plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
+                        plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
+                        plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
+                        plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
+                        plain_content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', plain_content)  # Remove links
+                        plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
+                        plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
+                        st.text(plain_content)
             else:
                 # Get the error message
                 error_msg = message.get('error', 'Unknown error')
                 
                 # Clean up common error patterns
                 if "Input was rejected for safety reasons" in error_msg:
-                    st.error("⚠️ Please rephrase your question in a clearer way and try again.")
+                    st.error("⚠️ Please refer to 'Available Commands' and try again.")
                 elif "Could not establish session" in error_msg:
                     st.error("🔌 Connection issue - please try again in a moment.")
                 elif "Failed to get data from MCP server" in error_msg:
