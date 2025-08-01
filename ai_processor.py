@@ -949,6 +949,9 @@ Make the output professional but easy to read at a glance. For large datasets, p
             if len(data) > 0 and 'result' in data[0]:
                 result_text = data[0]['result']
             
+            # Check if this is a generate_do command
+            is_generate_do = 'generate do' in user_query.lower() or 'create do' in user_query.lower()
+            
             # Prepare context for Claude formatting
             context = f"""User asked: "{user_query}"
 
@@ -965,6 +968,9 @@ Guidelines:
 5. For approvals/rejections, use clear status indicators
 6. For generation tasks, provide helpful next steps
 7. Keep it concise but informative
+{"8. For DO generation, DO NOT include or mention any download links in the response" if is_generate_do else ""}
+
+{"Additional instruction for DO generation: Focus on confirming the DO creation and providing the DO number or relevant details, but exclude any mention of download links." if is_generate_do else ""}
 
 Format the response as if you're directly answering the user's question with this information."""
 
