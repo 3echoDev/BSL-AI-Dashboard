@@ -830,7 +830,7 @@ MANDATORY: Display a table with 50+ actual data rows from the provided dataset. 
             # Use table format if auto-detected or specifically requested
             if should_use_table_format or is_table_request:
                 logger.info("Auto-formatting structured data as table - showing ALL records")
-                return self._create_comprehensive_table_analysis(data, tool_context or tool_info)
+                return self._create_comprehensive_table_analysis(data, tool_context)
             
             # Prepare context for Claude
             context = self._prepare_formatting_context(user_query, data, conversation_context)
@@ -948,9 +948,45 @@ Make the output professional but easy to read at a glance. For large datasets, p
             result_text = ""
             if len(data) > 0 and 'result' in data[0]:
                 result_text = data[0]['result']
+                
+                # If this is a download link command, extract the download link from JSON
+                if 'do_download_link' in user_query.lower():
+                    import json
+                    import re
+                    try:
+                        # Try to parse as JSON first
+                        data_list = json.loads(result_text)
+                        if isinstance(data_list, list) and len(data_list) > 0:
+                            # Get the first item and extract download link
+                            item = data_list[0]
+                            if isinstance(item, dict) and "Download Link" in item:
+                                url = item["Download Link"]
+                                do_number = item.get("DO Number", "requested")
+                                result_text = f"DOWNLOAD_LINK:{url}|DO:{do_number}"
+                            else:
+                                # Fallback to regex if structure is different
+                                url_match = re.search(r'https?://[^\s<>"]+|www\.[^\s<>"]+', result_text)
+                                if url_match:
+                                    url = url_match.group()
+                                    do_match = re.search(r'do[#\s\-]*(\w+)', user_query, re.IGNORECASE)
+                                    do_number = do_match.group(1) if do_match else "requested"
+                                    result_text = f"DOWNLOAD_LINK:{url}|DO:{do_number}"
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        # Fallback to regex extraction if JSON parsing fails
+                        url_match = re.search(r'https?://[^\s<>"]+|www\.[^\s<>"]+', result_text)
+                        if url_match:
+                            url = url_match.group()
+                            do_match = re.search(r'do[#\s\-]*(\w+)', user_query, re.IGNORECASE)
+                            do_number = do_match.group(1) if do_match else "requested"
+                            result_text = f"DOWNLOAD_LINK:{url}|DO:{do_number}"
             
             # Check if this is a generate_do command
             is_generate_do = 'generate do' in user_query.lower() or 'create do' in user_query.lower()
+            
+            # Check if this is a download link command - if so, don't format with Claude
+            if 'do_download_link' in user_query.lower() and (result_text.startswith(('http://', 'https://')) or result_text.startswith('DOWNLOAD_LINK:')):
+                # For download links, return the URL directly without Claude formatting
+                return result_text
             
             # Prepare context for Claude formatting
             context = f"""User asked: "{user_query}"

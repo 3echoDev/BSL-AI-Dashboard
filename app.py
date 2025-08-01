@@ -88,6 +88,20 @@ def display_chat_message(message: Dict, is_user: bool = True):
                     st.error(content.get('error', 'An error occurred'))
                     return
                 
+                # Check for special download link format
+                if isinstance(content, str) and content.startswith('DOWNLOAD_LINK:'):
+                    # Parse the special download link format
+                    parts = content.split('|')
+                    if len(parts) >= 2:
+                        url_part = parts[0].replace('DOWNLOAD_LINK:', '')
+                        do_part = parts[1].replace('DO:', '')
+                        
+                        # Create a clickable link with the DO number
+                        st.markdown(f"**Download Link for DO-{do_part}:**")
+                        st.markdown(f"[Click here to download DO-{do_part}]({url_part})", unsafe_allow_html=True)
+                        st.success("🔗 Click the link above to download the file")
+                        return
+                
                 # Check if this is an AI-generated response with special formatting
                 source = message.get("source", "")
                 tool_used = message.get("tool_used", "")
@@ -103,20 +117,29 @@ def display_chat_message(message: Dict, is_user: bool = True):
                 # Force table rendering for any content that looks like a table
                 if pipe_count >= 6 or has_table_keywords:
                     st.markdown(content, unsafe_allow_html=True)
+                # Special handling for download link responses - just plain URLs
+                elif isinstance(content, str) and content.startswith(('http://', 'https://')) and len(content.split()) == 1:
+                    st.markdown(f"**Download Link:**")
+                    st.markdown(f"[Click here to download DO-001]({content})", unsafe_allow_html=True)
+                    st.success("🔗 Click the link above to download the file")
                 elif source in ["ai_processor", "ai_table_formatter", "claude_formatted", "agent_workflow_fallback"]:
-                    # Display non-table AI responses as plain text for consistent font
+                    # Display AI responses with preserved links but simplified formatting
                     import re
-                    # Strip ALL markdown formatting for consistent font
-                    plain_content = content
-                    plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
-                    plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
-                    plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
-                    plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
-                    plain_content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', plain_content)  # Remove links
-                    plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
-                    plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
-                    # Use st.text for completely plain text display
-                    st.text(plain_content)
+                    # Check if content contains links - if so, use markdown rendering
+                    if re.search(r'\[.*?\]\(.*?\)', content) or re.search(r'https?://[^\s]+', content):
+                        # Content has links - use markdown to preserve clickability
+                        st.markdown(content, unsafe_allow_html=True)
+                    else:
+                        # No links - use plain text for consistent font
+                        plain_content = content
+                        plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
+                        plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
+                        plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
+                        plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
+                        plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
+                        plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
+                        # Use st.text for completely plain text display
+                        st.text(plain_content)
                     
                     # Show appropriate status indicators
                     if source == "claude_formatted":
@@ -179,29 +202,39 @@ def display_chat_message(message: Dict, is_user: bool = True):
                         elif str(content).startswith('{') and 'content' in str(content):
                             st.warning("🔧 Raw MCP response - enable AI formatting for better display")
                         
-                        # Apply same plain text treatment to all responses for consistent font
+                        # Check if content contains links - preserve them if so
                         import re
-                        plain_content = str(content)
-                        plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
-                        plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
-                        plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
-                        plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
-                        plain_content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', plain_content)  # Remove links
-                        plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
-                        plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
-                        st.text(plain_content)
+                        content_str = str(content)
+                        if re.search(r'\[.*?\]\(.*?\)', content_str) or re.search(r'https?://[^\s]+', content_str):
+                            # Content has links - use markdown to preserve clickability
+                            st.markdown(content_str, unsafe_allow_html=True)
+                        else:
+                            # No links - apply plain text treatment for consistent font
+                            plain_content = content_str
+                            plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
+                            plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
+                            plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
+                            plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
+                            plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
+                            plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
+                            st.text(plain_content)
                     except:
-                        # Apply plain text treatment to fallback content too
+                        # Check if fallback content contains links - preserve them if so
                         import re
-                        plain_content = str(content)
-                        plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
-                        plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
-                        plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
-                        plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
-                        plain_content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', plain_content)  # Remove links
-                        plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
-                        plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
-                        st.text(plain_content)
+                        content_str = str(content)
+                        if re.search(r'\[.*?\]\(.*?\)', content_str) or re.search(r'https?://[^\s]+', content_str):
+                            # Content has links - use markdown to preserve clickability
+                            st.markdown(content_str, unsafe_allow_html=True)
+                        else:
+                            # No links - apply plain text treatment to fallback content
+                            plain_content = content_str
+                            plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', plain_content)  # Remove bold
+                            plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)  # Remove italic  
+                            plain_content = re.sub(r'#{1,6}\s*', '', plain_content)  # Remove headers
+                            plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)  # Remove code formatting
+                            plain_content = re.sub(r'_{1,2}(.*?)_{1,2}', r'\1', plain_content)  # Remove underline
+                            plain_content = re.sub(r'~~(.*?)~~', r'\1', plain_content)  # Remove strikethrough
+                            st.text(plain_content)
             else:
                 # Get the error message
                 error_msg = message.get('error', 'Unknown error')
