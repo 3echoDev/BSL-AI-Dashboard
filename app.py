@@ -93,8 +93,18 @@ def display_chat_message(message: Dict, is_user: bool = True):
                 tool_used = message.get("tool_used", "")
                 tool_type = message.get("tool_type", "")
                 
-                if source in ["ai_processor", "ai_table_formatter", "claude_formatted", "agent_workflow_fallback"]:
-                    # Display AI responses as plain text only - no formatting at all
+                # AGGRESSIVE TABLE DETECTION - Check all responses for table content
+                pipe_count = content.count('|') if isinstance(content, str) else 0
+                has_table_keywords = any(keyword in str(content).lower() for keyword in [
+                    'treatment parts data table', 'data table', 'analysis report',
+                    's/n', 'part number', 'supplier', 'description'
+                ])
+                
+                # Force table rendering for any content that looks like a table
+                if pipe_count >= 6 or has_table_keywords:
+                    st.markdown(content, unsafe_allow_html=True)
+                elif source in ["ai_processor", "ai_table_formatter", "claude_formatted", "agent_workflow_fallback"]:
+                    # Display non-table AI responses as plain text for consistent font
                     import re
                     # Strip ALL markdown formatting for consistent font
                     plain_content = content

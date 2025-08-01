@@ -41,8 +41,12 @@ def main():
     print("-" * 40)
     
     try:
-        # Start Streamlit
-        subprocess.run([sys.executable, "-m", "streamlit", "run", "app.py"])
+        # Start Streamlit with auto-reload for development
+        subprocess.run([
+            sys.executable, "-m", "streamlit", "run", "app.py",
+            "--server.runOnSave=true",
+            "--server.fileWatcherType=auto"
+        ])
     except KeyboardInterrupt:
         print("\n🛑 Application stopped by user")
     except Exception as e:
